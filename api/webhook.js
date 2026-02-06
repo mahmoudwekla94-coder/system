@@ -43,13 +43,13 @@ module.exports = async function webhook(req, res) {
     const storeTag = String(storeTagRaw).toUpperCase();
 
     // =========================
-    // Store Config (template + lang = ar)
+    // Store Config
     // =========================
     const storeConfig = {
-      EQ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      BZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      GZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      SH: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      EQ: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
+      BZ: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
+      GZ: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
+      SH: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
     };
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
@@ -230,4 +230,74 @@ module.exports = async function webhook(req, res) {
 
     const nationalAddress =
       safeText(nationalAddressRaw) ||
-      "غير متوفر (يرجى تزويدن
+      "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
+
+    // =========================
+    // ENV
+    // =========================
+    const API_BASE_URL = process.env.SAAS_API_BASE_URL;
+    const VENDOR_UID = process.env.SAAS_VENDOR_UID;
+    const API_TOKEN = process.env.SAAS_API_TOKEN;
+
+    if (!API_BASE_URL || !VENDOR_UID || !API_TOKEN) {
+      return res.status(500).json({ error: "missing_env" });
+    }
+
+    // =========================
+    // WhatsApp Payload
+    // =========================
+    const payload = {
+      phone_number: digitsPhone,
+      template_name: cfg.template,
+      template_language: cfg.lang,
+
+      field_1: safeText(customerName),
+      field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
+      field_3: safeText(productName),
+      field_4: safeText(quantity),
+      field_5: safeText(priceText),
+      field_6: safeText(shippingText),
+      field_7: safeText(totalText),
+      field_8: safeText(detailedAddress),
+      field_9: safeText(nationalAddress),
+
+      contact: {
+        first_name: safeText(customerName),
+        phone_number: digitsPhone,
+        country: "auto",
+      },
+    };
+
+    const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
+
+    console.log("🏪 Store:", storeTag, "| isShopifyOrder:", isShopifyOrder);
+    console.log("🧩 Template:", cfg.template, "| Lang:", cfg.lang);
+    console.log("🚀 Payload:", payload);
+
+    const saasRes = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${API_TOKEN}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const responseData = await saasRes.json().catch(() => null);
+
+    if (!saasRes.ok || responseData?.result === "failed") {
+      console.error("❌ SaaS Error:", responseData);
+      return res.status(500).json({ error: "saas_error", responseData });
+    }
+
+    console.log("✅ Success:", responseData);
+    return res.status(200).json({ status: "sent", storeTag, data: responseData });
+
+  } catch (err) {
+    console.error("❌ Webhook Crash:", err);
+    return res.status(500).json({
+      error: "internal_error",
+      details: err?.message || String(err),
+    });
+  }
+};
