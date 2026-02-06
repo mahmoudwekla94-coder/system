@@ -43,13 +43,13 @@ module.exports = async function webhook(req, res) {
     const storeTag = String(storeTagRaw).toUpperCase();
 
     // =========================
-    // Store Config
+    // Store Config (Currency / Country only)
     // =========================
     const storeConfig = {
-      EQ: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
-      BZ: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
-      GZ: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
-      SH: { template: "ordar_confirmation", lang: "ar_EG", currency: "ريال سعودي", defaultCountry: "KSA" },
+      EQ: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      BZ: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      GZ: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      SH: { currency: "ريال سعودي", defaultCountry: "KSA" },
     };
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
@@ -87,7 +87,6 @@ module.exports = async function webhook(req, res) {
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
       if (raw.startsWith("05") && raw.length === 10) {
-        if (country === "UAE") return `+971${raw.substring(1)}`;
         return `+966${raw.substring(1)}`;
       }
 
@@ -244,12 +243,12 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // WhatsApp Payload
+    // WhatsApp Payload (FIXED TEMPLATE + LANG)
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: cfg.template,
-      template_language: cfg.lang,
+      template_name: "ordar_confirmation",
+      template_language: "ar",
 
       field_1: safeText(customerName),
       field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
@@ -271,7 +270,7 @@ module.exports = async function webhook(req, res) {
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
     console.log("🏪 Store:", storeTag, "| isShopifyOrder:", isShopifyOrder);
-    console.log("🧩 Template:", cfg.template, "| Lang:", cfg.lang);
+    console.log("🧩 Template: ordar_confirmation | Lang: ar");
     console.log("🚀 Payload:", payload);
 
     const saasRes = await fetch(endpoint, {
