@@ -31,11 +31,15 @@ module.exports = async function webhook(req, res) {
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
     // =========================
-    // FIXED STORE (TR)
+    // STORE (FIXED TR)
     // =========================
     const storeTag = "TR";
-    const currency = "ريال سعودي";
-    const defaultCountry = "KSA";
+
+    const storeConfig = {
+      TR: { currency: "ريال سعودي", defaultCountry: "KSA" },
+    };
+
+    const cfg = storeConfig.TR;
 
     // =========================
     // Detect Shopify Order
@@ -49,11 +53,25 @@ module.exports = async function webhook(req, res) {
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
     // =========================
-    // Normalize Phone
+    // Normalize Phone (E.164)
     // =========================
-    function normalizePhone(phone) {
+    function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
       let raw = String(phone).replace(/[^0-9]/g, "");
+
+      const knownCodes = [
+        "966","971","20","249","967","962","965","974","973","968",
+        "964","212","213","216","218","970","961","963","222"
+      ];
+
+      for (const code of knownCodes) {
+        if (raw.startsWith(code)) return `+${raw}`;
+      }
+
+      if (raw.startsWith("01") && raw.length === 11) return `+20${raw.substring(1)}`;
+      if (raw.startsWith("09") && raw.length === 10) return `+249${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
       if (raw.startsWith("05") && raw.length === 10) {
         return `+966${raw.substring(1)}`;
@@ -65,7 +83,7 @@ module.exports = async function webhook(req, res) {
     // =========================
     // Data Mapping
     // =========================
-    let customerName, customerPhone, orderId;
+    let customerName, customerPhone, orderId, country;
     let productName, quantity = 1;
     let priceRaw = 0, shippingRaw = 0;
     let detailedAddress = "غير متوفر";
@@ -73,55 +91,115 @@ module.exports = async function webhook(req, res) {
 
     if (isShopifyOrder) {
       const shipping = data.shipping_address || {};
+      const billing = data.billing_address || {};
       const items = Array.isArray(data.line_items) ? data.line_items : [];
       const firstItem = items[0] || {};
 
+      const fullName = safeText(`${shipping.first_name || ""} ${shipping.last_name || ""}`);
       customerName =
-        safeText(`${shipping.first_name || ""} ${shipping.last_name || ""}`) ||
+        fullName ||
+        safeText(shipping.name) ||
+        safeText(billing.name) ||
         "عميلنا العزيز";
 
       customerPhone =
         shipping.phone ||
         data.phone ||
+        data.customer?.phone ||
         "";
 
-      orderId = data.name || data.id || "";
+      orderId = data.name || data.order_number || data.id || "";
+
+      country =
+        shipping.country_code ||
+        shipping.country ||
+        cfg.defaultCountry;
 
       quantity = firstItem.quantity ?? 1;
-      productName = firstItem.title || "منتج";
+      productName =
+        items.length > 1
+          ? `${firstItem.title} + ${items.length - 1} منتجات أخرى`
+          : firstItem.title || "منتج";
 
       priceRaw = firstItem.price ?? data.total_price ?? 0;
-      shippingRaw = data.shipping_lines?.[0]?.price ?? 0;
+
+      const shippingLine = data.shipping_lines?.[0] || {};
+      shippingRaw =
+        shippingLine.price ??
+        data.total_shipping_price_set?.shop_money?.amount ??
+        0;
 
       detailedAddress = [
         shipping.address1,
+        shipping.address2,
         shipping.city,
+        shipping.province,
+        shipping.zip,
       ].filter(Boolean).join(" - ");
 
     } else {
-      customerName = data.full_name || "عميلنا العزيز";
-      customerPhone = data.phone || "";
-      orderId = data.order_id || data.id || "";
+      customerName =
+        data.full_name ||
+        data.name ||
+        data.customer_name ||
+        "عميلنا العزيز";
+
+      customerPhone =
+        data.phone ||
+        data.phone_alt ||
+        data.customer_phone ||
+        "";
+
+      orderId =
+        data.short_id ||
+        data.order_id ||
+        data.id ||
+        "";
+
+      country =
+        data.country ||
+        data.shipping_country ||
+        cfg.defaultCountry;
 
       const firstItem = data.cart_items?.[0] || {};
       quantity = firstItem.quantity ?? 1;
       productName = firstItem.product?.name || "منتج";
 
-      priceRaw = firstItem.price ?? data.total_cost ?? 0;
-      shippingRaw = data.shipping_cost ?? 0;
+      priceRaw =
+        firstItem.price ??
+        data.total_cost ??
+        data.cost ??
+        0;
 
-      detailedAddress = data.address || data.city || "غير متوفر";
-      nationalAddressRaw = data.national_address || "";
+      shippingRaw =
+        data.shipping_cost ??
+        data.shipping_fee ??
+        data.shipping_price ??
+        data.delivery_cost ??
+        data.shipping ??
+        0;
+
+      detailedAddress =
+        data.address ||
+        data.full_address ||
+        data.shipping_address ||
+        data.city ||
+        "غير متوفر";
+
+      nationalAddressRaw =
+        data.national_address ||
+        data.short_address ||
+        "";
     }
 
     // =========================
     // Phone
     // =========================
-    const e164Phone = normalizePhone(customerPhone);
+    const e164Phone = normalizePhone(customerPhone, country);
     const digitsPhone = e164Phone.replace(/^\+/, "");
 
     if (!digitsPhone || digitsPhone.length < 9) {
-      return res.status(400).json({ error: "invalid_phone" });
+      return res.status(400).json({ error: "invalid_phone", customerPhone });
     }
 
     // =========================
@@ -131,7 +209,8 @@ module.exports = async function webhook(req, res) {
     const shippingNum = toNumber(shippingRaw);
     const totalNum = priceNum + shippingNum;
 
-    const priceText = `${priceNum} ${currency}`;
+    const currency = cfg.currency;
+    const priceText = priceNum ? `${priceNum} ${currency}` : "غير محدد";
     const shippingText = shippingNum ? `${shippingNum} ${currency}` : "مجاني";
     const totalText = `${totalNum} ${currency}`;
 
@@ -159,14 +238,14 @@ module.exports = async function webhook(req, res) {
       template_language: "ar",
 
       field_1: safeText(customerName),
-      field_2: `${orderId} (TR)`,
+      field_2: safeText(`${orderId} (TR)`),
       field_3: safeText(productName),
-      field_4: quantity,
-      field_5: priceText,
-      field_6: shippingText,
-      field_7: totalText,
-      field_8: detailedAddress,
-      field_9: nationalAddress,
+      field_4: safeText(quantity),
+      field_5: safeText(priceText),
+      field_6: safeText(shippingText),
+      field_7: safeText(totalText),
+      field_8: safeText(detailedAddress),
+      field_9: safeText(nationalAddress),
 
       contact: {
         first_name: safeText(customerName),
@@ -176,6 +255,10 @@ module.exports = async function webhook(req, res) {
     };
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
+
+    console.log("🏪 Store: TR | isShopifyOrder:", isShopifyOrder);
+    console.log("🧩 Template: ordar_confirmation | Lang: ar");
+    console.log("🚀 Payload:", payload);
 
     const saasRes = await fetch(endpoint, {
       method: "POST",
@@ -189,12 +272,15 @@ module.exports = async function webhook(req, res) {
     const responseData = await saasRes.json().catch(() => null);
 
     if (!saasRes.ok || responseData?.result === "failed") {
+      console.error("❌ SaaS Error:", responseData);
       return res.status(500).json({ error: "saas_error", responseData });
     }
 
-    return res.status(200).json({ status: "sent", store: "TR" });
+    console.log("✅ Success:", responseData);
+    return res.status(200).json({ status: "sent", store: "TR", data: responseData });
 
   } catch (err) {
+    console.error("❌ Webhook Crash:", err);
     return res.status(500).json({
       error: "internal_error",
       details: err?.message || String(err),
