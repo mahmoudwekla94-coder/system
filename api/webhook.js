@@ -31,15 +31,28 @@ module.exports = async function webhook(req, res) {
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
     // =========================
-    // STORE (FIXED TR)
+    // Store Tag
     // =========================
-    const storeTag = "TR";
+    const u = new URL(req.url, `https://${req.headers.host}`);
+    const storeTagRaw =
+      u.searchParams.get("storeTag") ||
+      data.storeTag ||
+      data.tag ||
+      "EQ";
 
+    const storeTag = String(storeTagRaw).toUpperCase();
+
+    // =========================
+    // Store Config
+    // =========================
     const storeConfig = {
-      TR: { currency: "ريال سعودي", defaultCountry: "KSA" },
+      EQ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      BZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      GZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      SH: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
     };
 
-    const cfg = storeConfig.TR;
+    const cfg = storeConfig[storeTag] || storeConfig.EQ;
 
     // =========================
     // Detect Shopify Order
@@ -53,7 +66,7 @@ module.exports = async function webhook(req, res) {
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
     // =========================
-    // Normalize Phone (E.164)
+    // Normalize Phone
     // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
@@ -74,6 +87,7 @@ module.exports = async function webhook(req, res) {
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
       if (raw.startsWith("05") && raw.length === 10) {
+        if (country === "UAE") return `+971${raw.substring(1)}`;
         return `+966${raw.substring(1)}`;
       }
 
@@ -91,31 +105,20 @@ module.exports = async function webhook(req, res) {
 
     if (isShopifyOrder) {
       const shipping = data.shipping_address || {};
-      const billing = data.billing_address || {};
       const items = Array.isArray(data.line_items) ? data.line_items : [];
       const firstItem = items[0] || {};
 
       const fullName = safeText(`${shipping.first_name || ""} ${shipping.last_name || ""}`);
-      customerName =
-        fullName ||
-        safeText(shipping.name) ||
-        safeText(billing.name) ||
-        "عميلنا العزيز";
+      customerName = fullName || safeText(shipping.name) || "عميلنا العزيز";
 
-      customerPhone =
-        shipping.phone ||
-        data.phone ||
-        data.customer?.phone ||
-        "";
+      customerPhone = shipping.phone || data.phone || "";
 
       orderId = data.name || data.order_number || data.id || "";
 
-      country =
-        shipping.country_code ||
-        shipping.country ||
-        cfg.defaultCountry;
+      country = shipping.country_code || shipping.country || cfg.defaultCountry;
 
       quantity = firstItem.quantity ?? 1;
+
       productName =
         items.length > 1
           ? `${firstItem.title} + ${items.length - 1} منتجات أخرى`
@@ -124,77 +127,30 @@ module.exports = async function webhook(req, res) {
       priceRaw = firstItem.price ?? data.total_price ?? 0;
 
       const shippingLine = data.shipping_lines?.[0] || {};
-      shippingRaw =
-        shippingLine.price ??
-        data.total_shipping_price_set?.shop_money?.amount ??
-        0;
+      shippingRaw = shippingLine.price ?? 0;
 
       detailedAddress = [
         shipping.address1,
-        shipping.address2,
         shipping.city,
         shipping.province,
         shipping.zip,
       ].filter(Boolean).join(" - ");
 
     } else {
-      customerName =
-        data.full_name ||
-        data.name ||
-        data.customer_name ||
-        "عميلنا العزيز";
-
-      customerPhone =
-        data.phone ||
-        data.phone_alt ||
-        data.customer_phone ||
-        "";
-
-      orderId =
-        data.short_id ||
-        data.order_id ||
-        data.id ||
-        "";
-
-      country =
-        data.country ||
-        data.shipping_country ||
-        cfg.defaultCountry;
+      customerName = data.full_name || data.name || "عميلنا العزيز";
+      customerPhone = data.phone || "";
+      orderId = data.short_id || data.order_id || data.id || "";
+      country = data.country || cfg.defaultCountry;
 
       const firstItem = data.cart_items?.[0] || {};
       quantity = firstItem.quantity ?? 1;
       productName = firstItem.product?.name || "منتج";
-
-      priceRaw =
-        firstItem.price ??
-        data.total_cost ??
-        data.cost ??
-        0;
-
-      shippingRaw =
-        data.shipping_cost ??
-        data.shipping_fee ??
-        data.shipping_price ??
-        data.delivery_cost ??
-        data.shipping ??
-        0;
-
-      detailedAddress =
-        data.address ||
-        data.full_address ||
-        data.shipping_address ||
-        data.city ||
-        "غير متوفر";
-
-      nationalAddressRaw =
-        data.national_address ||
-        data.short_address ||
-        "";
+      priceRaw = firstItem.price ?? data.total_cost ?? 0;
+      shippingRaw = data.shipping_cost ?? 0;
+      detailedAddress = data.address || "غير متوفر";
+      nationalAddressRaw = data.national_address || "";
     }
 
-    // =========================
-    // Phone
-    // =========================
     const e164Phone = normalizePhone(customerPhone, country);
     const digitsPhone = e164Phone.replace(/^\+/, "");
 
@@ -202,9 +158,6 @@ module.exports = async function webhook(req, res) {
       return res.status(400).json({ error: "invalid_phone", customerPhone });
     }
 
-    // =========================
-    // Prices
-    // =========================
     const priceNum = toNumber(priceRaw);
     const shippingNum = toNumber(shippingRaw);
     const totalNum = priceNum + shippingNum;
@@ -218,9 +171,6 @@ module.exports = async function webhook(req, res) {
       safeText(nationalAddressRaw) ||
       "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
-    // =========================
-    // ENV
-    // =========================
     const API_BASE_URL = process.env.SAAS_API_BASE_URL;
     const VENDOR_UID = process.env.SAAS_VENDOR_UID;
     const API_TOKEN = process.env.SAAS_API_TOKEN;
@@ -229,16 +179,13 @@ module.exports = async function webhook(req, res) {
       return res.status(500).json({ error: "missing_env" });
     }
 
-    // =========================
-    // WhatsApp Payload
-    // =========================
     const payload = {
       phone_number: digitsPhone,
       template_name: "ordar_confirmation",
       template_language: "ar",
 
       field_1: safeText(customerName),
-      field_2: safeText(`${orderId} (TR)`),
+      field_2: safeText(`${orderId} (${storeTag})`),
       field_3: safeText(productName),
       field_4: safeText(quantity),
       field_5: safeText(priceText),
@@ -256,10 +203,6 @@ module.exports = async function webhook(req, res) {
 
     const endpoint = `${API_BASE_URL}/${VENDOR_UID}/contact/send-template-message`;
 
-    console.log("🏪 Store: TR | isShopifyOrder:", isShopifyOrder);
-    console.log("🧩 Template: ordar_confirmation | Lang: ar");
-    console.log("🚀 Payload:", payload);
-
     const saasRes = await fetch(endpoint, {
       method: "POST",
       headers: {
@@ -272,15 +215,12 @@ module.exports = async function webhook(req, res) {
     const responseData = await saasRes.json().catch(() => null);
 
     if (!saasRes.ok || responseData?.result === "failed") {
-      console.error("❌ SaaS Error:", responseData);
       return res.status(500).json({ error: "saas_error", responseData });
     }
 
-    console.log("✅ Success:", responseData);
-    return res.status(200).json({ status: "sent", store: "TR", data: responseData });
+    return res.status(200).json({ status: "sent", storeTag, data: responseData });
 
   } catch (err) {
-    console.error("❌ Webhook Crash:", err);
     return res.status(500).json({
       error: "internal_error",
       details: err?.message || String(err),
