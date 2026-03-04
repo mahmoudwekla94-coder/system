@@ -31,7 +31,7 @@ module.exports = async function webhook(req, res) {
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
     // =========================
-    // Store Tag
+    // Store Tag (WHATWG URL)
     // =========================
     const u = new URL(req.url, `https://${req.headers.host}`);
     const storeTagRaw =
@@ -46,10 +46,30 @@ module.exports = async function webhook(req, res) {
     // Store Config
     // =========================
     const storeConfig = {
-      EQ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      BZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      GZ: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
-      SH: { template: "ordar_confirmation", lang: "ar", currency: "ريال سعودي", defaultCountry: "KSA" },
+      EQ: {
+        template: "order_confirmation",
+        lang: "ar",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+      BZ: {
+        template: "order_confirmation",
+        lang: "ar",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+      GZ: {
+        template: "order_confirmation",
+        lang: "ar",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
+      SH: {
+        template: "order_confirmation",
+        lang: "ar",
+        currency: "ريال سعودي",
+        defaultCountry: "KSA",
+      },
     };
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
@@ -66,7 +86,7 @@ module.exports = async function webhook(req, res) {
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
     // =========================
-    // Normalize Phone
+    // Normalize Phone (E.164)
     // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
@@ -86,6 +106,7 @@ module.exports = async function webhook(req, res) {
       if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
+      // السعودية / الإمارات
       if (raw.startsWith("05") && raw.length === 10) {
         if (country === "UAE") return `+971${raw.substring(1)}`;
         return `+966${raw.substring(1)}`;
@@ -105,17 +126,29 @@ module.exports = async function webhook(req, res) {
 
     if (isShopifyOrder) {
       const shipping = data.shipping_address || {};
+      const billing = data.billing_address || {};
       const items = Array.isArray(data.line_items) ? data.line_items : [];
       const firstItem = items[0] || {};
 
       const fullName = safeText(`${shipping.first_name || ""} ${shipping.last_name || ""}`);
-      customerName = fullName || safeText(shipping.name) || "عميلنا العزيز";
+      customerName =
+        fullName ||
+        safeText(shipping.name) ||
+        safeText(billing.name) ||
+        "عميلنا العزيز";
 
-      customerPhone = shipping.phone || data.phone || "";
+      customerPhone =
+        shipping.phone ||
+        data.phone ||
+        data.customer?.phone ||
+        "";
 
       orderId = data.name || data.order_number || data.id || "";
 
-      country = shipping.country_code || shipping.country || cfg.defaultCountry;
+      country =
+        shipping.country_code ||
+        shipping.country ||
+        cfg.defaultCountry;
 
       quantity = firstItem.quantity ?? 1;
 
@@ -127,28 +160,72 @@ module.exports = async function webhook(req, res) {
       priceRaw = firstItem.price ?? data.total_price ?? 0;
 
       const shippingLine = data.shipping_lines?.[0] || {};
-      shippingRaw = shippingLine.price ?? 0;
+      shippingRaw =
+        shippingLine.price ??
+        data.total_shipping_price_set?.shop_money?.amount ??
+        0;
 
       detailedAddress = [
         shipping.address1,
+        shipping.address2,
         shipping.city,
         shipping.province,
         shipping.zip,
       ].filter(Boolean).join(" - ");
 
     } else {
-      customerName = data.full_name || data.name || "عميلنا العزيز";
-      customerPhone = data.phone || "";
-      orderId = data.short_id || data.order_id || data.id || "";
-      country = data.country || cfg.defaultCountry;
+      customerName =
+        data.full_name ||
+        data.name ||
+        data.customer_name ||
+        "عميلنا العزيز";
+
+      customerPhone =
+        data.phone ||
+        data.phone_alt ||
+        data.customer_phone ||
+        "";
+
+      orderId =
+        data.short_id ||
+        data.order_id ||
+        data.id ||
+        "";
+
+      country =
+        data.country ||
+        data.shipping_country ||
+        cfg.defaultCountry;
 
       const firstItem = data.cart_items?.[0] || {};
       quantity = firstItem.quantity ?? 1;
       productName = firstItem.product?.name || "منتج";
-      priceRaw = firstItem.price ?? data.total_cost ?? 0;
-      shippingRaw = data.shipping_cost ?? 0;
-      detailedAddress = data.address || "غير متوفر";
-      nationalAddressRaw = data.national_address || "";
+
+      priceRaw =
+        firstItem.price ??
+        data.total_cost ??
+        data.cost ??
+        0;
+
+      shippingRaw =
+        data.shipping_cost ??
+        data.shipping_fee ??
+        data.shipping_price ??
+        data.delivery_cost ??
+        data.shipping ??
+        0;
+
+      detailedAddress =
+        data.address ||
+        data.full_address ||
+        data.shipping_address ||
+        data.city ||
+        "غير متوفر";
+
+      nationalAddressRaw =
+        data.national_address ||
+        data.short_address ||
+        "";
     }
 
     const e164Phone = normalizePhone(customerPhone, country);
@@ -171,21 +248,29 @@ module.exports = async function webhook(req, res) {
       safeText(nationalAddressRaw) ||
       "غير متوفر (يرجى تزويدنا بالعنوان الوطني)";
 
+    // =========================
+    // ENV
+    // =========================
     const API_BASE_URL = process.env.SAAS_API_BASE_URL;
     const VENDOR_UID = process.env.SAAS_VENDOR_UID;
     const API_TOKEN = process.env.SAAS_API_TOKEN;
 
     if (!API_BASE_URL || !VENDOR_UID || !API_TOKEN) {
-      return res.status(500).json({ error: "missing_env" });
+      return res.status(500).json({
+        error: "missing_env",
+      });
     }
 
+    // =========================
+    // Payload
+    // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: "ordar_confirmation",
-      template_language: "ar",
+      template_name: cfg.template,       // ✅ order_confirmation
+      template_language: cfg.lang,       // ✅ ar
 
       field_1: safeText(customerName),
-      field_2: safeText(`${orderId} (${storeTag})`),
+      field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
       field_3: safeText(productName),
       field_4: safeText(quantity),
       field_5: safeText(priceText),
