@@ -31,7 +31,7 @@ module.exports = async function webhook(req, res) {
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
     // =========================
-    // Store Tag (WHATWG URL)
+    // Store Tag
     // =========================
     const u = new URL(req.url, `https://${req.headers.host}`);
     const storeTagRaw =
@@ -43,30 +43,22 @@ module.exports = async function webhook(req, res) {
     const storeTag = String(storeTagRaw).toUpperCase();
 
     // =========================
-    // Store Config
+    // Store Config (لسه موجود بس مش مستخدم للتمبلت/اللغة)
     // =========================
     const storeConfig = {
       EQ: {
-        template: "order_confirmation",
-        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       BZ: {
-        template: "order_confirmation",
-        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       GZ: {
-        template: "order_confirmation",
-        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
       SH: {
-        template: "order_confirmation",
-        lang: "ar",
         currency: "ريال سعودي",
         defaultCountry: "KSA",
       },
@@ -86,7 +78,7 @@ module.exports = async function webhook(req, res) {
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
     // =========================
-    // Normalize Phone (E.164)
+    // Normalize Phone
     // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
@@ -106,7 +98,6 @@ module.exports = async function webhook(req, res) {
       if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
-      // السعودية / الإمارات
       if (raw.startsWith("05") && raw.length === 10) {
         if (country === "UAE") return `+971${raw.substring(1)}`;
         return `+966${raw.substring(1)}`;
@@ -262,12 +253,12 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // Payload
+    // Payload (تم التعديل هنا فقط)
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: cfg.template,       // ✅ order_confirmation
-      template_language: cfg.lang,       // ✅ ar
+      template_name: "t_utillty",   // ✅
+      template_language: "ar",      // ✅
 
       field_1: safeText(customerName),
       field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
