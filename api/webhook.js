@@ -31,7 +31,7 @@ module.exports = async function webhook(req, res) {
       Number(String(v ?? "").replace(/[^0-9.]/g, "")) || 0;
 
     // =========================
-    // Store Tag
+    // Store Tag (WHATWG URL)
     // =========================
     const u = new URL(req.url, `https://${req.headers.host}`);
     const storeTagRaw =
@@ -43,26 +43,34 @@ module.exports = async function webhook(req, res) {
     const storeTag = String(storeTagRaw).toUpperCase();
 
     // =========================
-    // Store Config (لسه موجود بس مش مستخدم للتمبلت/اللغة)
+    // Store Config
     // =========================
-    const storeConfig = {
-      EQ: {
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      BZ: {
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      GZ: {
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-      SH: {
-        currency: "ريال سعودي",
-        defaultCountry: "KSA",
-      },
-    };
+const storeConfig = {
+  EQ: {
+    template: "t_utillty",
+    lang: "ar",
+    currency: "ريال سعودي",
+    defaultCountry: "KSA",
+  },
+  BZ: {
+    template: "t_utillty",
+    lang: "ar",
+    currency: "ريال سعودي",
+    defaultCountry: "KSA",
+  },
+  GZ: {
+    template: "t_utillty",
+    lang: "ar",
+    currency: "ريال سعودي",
+    defaultCountry: "KSA",
+  },
+  SH: {
+    template: "t_utillty",
+    lang: "ar",
+    currency: "ريال سعودي",
+    defaultCountry: "KSA",
+  },
+};
 
     const cfg = storeConfig[storeTag] || storeConfig.EQ;
 
@@ -78,15 +86,15 @@ module.exports = async function webhook(req, res) {
     const isShopifyOrder = looksLikeShopify && !data.cart_items;
 
     // =========================
-    // Normalize Phone
+    // Normalize Phone (E.164)
     // =========================
     function normalizePhone(phone, country = "KSA") {
       if (!phone) return "";
       let raw = String(phone).replace(/[^0-9]/g, "");
 
       const knownCodes = [
-        "966","971","20","249","967","962","965","974","973","968",
-        "964","212","213","216","218","970","961","963","222"
+        "966", "971", "20", "249", "967", "962", "965", "974", "973", "968",
+        "964", "212", "213", "216", "218", "970", "961", "963", "222"
       ];
 
       for (const code of knownCodes) {
@@ -95,9 +103,10 @@ module.exports = async function webhook(req, res) {
 
       if (raw.startsWith("01") && raw.length === 11) return `+20${raw.substring(1)}`;
       if (raw.startsWith("09") && raw.length === 10) return `+249${raw.substring(1)}`;
-      if (raw.startsWith("07") && raw.length === 9)  return `+967${raw.substring(1)}`;
+      if (raw.startsWith("07") && raw.length === 9) return `+967${raw.substring(1)}`;
       if (raw.startsWith("07") && raw.length === 10) return `+962${raw.substring(1)}`;
 
+      // السعودية / الإمارات
       if (raw.startsWith("05") && raw.length === 10) {
         if (country === "UAE") return `+971${raw.substring(1)}`;
         return `+966${raw.substring(1)}`;
@@ -253,12 +262,12 @@ module.exports = async function webhook(req, res) {
     }
 
     // =========================
-    // Payload (تم التعديل هنا فقط)
+    // Payload
     // =========================
     const payload = {
       phone_number: digitsPhone,
-      template_name: "t_utillty",   // ✅
-      template_language: "ar",      // ✅
+      template_name: cfg.template,       // ✅ t_utillty
+      template_language: cfg.lang,       // ✅ ar
 
       field_1: safeText(customerName),
       field_2: safeText(storeTag === "SH" ? "SH" : `${orderId} (${storeTag})`),
